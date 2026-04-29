@@ -1,0 +1,79 @@
+{
+  "name": "@solsonar/solana-multi-dex-decoder",
+  "version": "0.1.0",
+  "description": "Synchronous, zero-RPC decoder for Solana DEX pool accounts and swap instructions across six major DEXes: Meteora DLMM, Orca Whirlpool, Pump AMM, Raydium AMM v4, Raydium CPMM, Raydium CLMM.",
+  "keywords": [
+    "solana",
+    "dex",
+    "amm",
+    "decoder",
+    "parser",
+    "raydium",
+    "orca",
+    "meteora",
+    "pump-amm",
+    "whirlpool",
+    "dlmm",
+    "clmm",
+    "cpmm",
+    "swap",
+    "borsh",
+    "anchor",
+    "low-latency",
+    "mev",
+    "indexer"
+  ],
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/",
+    "lint": "node --check src/index.js && node --check src/PoolDecoder.js && node --check src/SwapParser.js && node --check src/DlmmDirection.js",
+    "example:decode-pool": "node examples/decode-pool.js",
+    "example:parse-tx": "node examples/parse-tx.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "@solana/web3.js": "^1.91.0",
+    "@coral-xyz/anchor": "^0.31.1 || ^0.32.0",
+    "@meteora-ag/dlmm": "^1.0.0",
+    "@orca-so/whirlpools-sdk": "^0.13.0"
+  },
+  "peerDependenciesMeta": {
+    "@meteora-ag/dlmm": {
+      "optional": true
+    },
+    "@orca-so/whirlpools-sdk": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@solana/web3.js": "^1.91.0",
+    "@coral-xyz/anchor": "^0.31.1",
+    "@meteora-ag/dlmm": "^1.0.0",
+    "@orca-so/whirlpools-sdk": "^0.13.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/solsonar/solana-multi-dex-decoder.git"
+  },
+  "bugs": {
+    "url": "https://github.com/solsonar/solana-multi-dex-decoder/issues"
+  },
+  "homepage": "https://github.com/solsonar/solana-multi-dex-decoder#readme",
+  "author": "Andrija Vujović <vujovic.andrija.b@gmail.com>",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
+}
