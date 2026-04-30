@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 import { createHash } from 'node:crypto';
+import { PublicKey } from '@solana/web3.js';
 import { deriveDlmmDirection } from './DlmmDirection.js';
 import {
   METEORA_DLMM_PROGRAM,
@@ -43,10 +44,30 @@ const WHIRLPOOL_SWAP_POOL_IDX  = 2;
 const WHIRLPOOL_SWAP_V2_POOL_IDX = 4;
 const PUMP_AMM_POOL_IDX        = 0;
 const RAYDIUM_AMM_V4_POOL_IDX  = 1;   // both V1 (17-18 acc) and V2 (8 acc)
+// Raydium AMM v4 user-side account positions (per raydium-amm/program/src/instruction.rs).
+// Used to derive direction via ATA matching (no RPC needed — owner + mint + tokenProgram → ATA).
+//   V1 layout (with Serum/OpenBook): 17-18 accounts
+//     [0] SPL Token Program
+//     [1] AMM Pool      [2] AMM Authority   [3] Open Orders
+//     [4] Coin Vault    [5] PC Vault        [6..13] Market accounts
+//     [14] User Source Token   [15] User Dest Token   [16] User Wallet (signer)
+//   V2 layout (orderbook-disabled): 8 accounts
+//     [0] SPL Token Program  [1] AMM Pool  [2] AMM Authority
+//     [3] Coin Vault  [4] PC Vault
+//     [5] User Source Token   [6] User Dest Token   [7] User Wallet (signer)
+const RAYDIUM_AMM_V4_USER_SOURCE_IDX_V1 = 14;
+const RAYDIUM_AMM_V4_USER_WALLET_IDX_V1 = 16;
+const RAYDIUM_AMM_V4_USER_SOURCE_IDX_V2 = 5;
+const RAYDIUM_AMM_V4_USER_WALLET_IDX_V2 = 7;
 const RAYDIUM_CPMM_POOL_IDX    = 3;
 const RAYDIUM_CPMM_INPUT_VAULT_IDX = 6;
 const RAYDIUM_CLMM_POOL_IDX    = 2;
 const RAYDIUM_CLMM_INPUT_VAULT_IDX = 5;
+
+// SPL Token program IDs (legacy + Token-2022) — both used in production for ATAs.
+const SPL_TOKEN = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
+const SPL_TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+const ATOKEN_PROGRAM = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL');
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -62,6 +83,58 @@ function deriveDirectionByVault(accountIdxs, resolvedKeys, inputVaultIdx, poolDe
   const reserveY = poolDecoded.reserve_y?.toBase58?.();
   if (inputVault === reserveX) return 'XtoY';
   if (inputVault === reserveY) return 'YtoX';
+  return 'unknown';
+}
+
+/**
+ * Derive the canonical Associated Token Account for (owner, mint, tokenProgram).
+ * Returns base58 string, or null if any input is invalid.
+ */
+function deriveAtaBase58(ownerStr, tokenProgramStr, mintStr) {
+  try {
+    const owner = new PublicKey(ownerStr);
+    const tokenProgram = new PublicKey(tokenProgramStr);
+    const mint = new PublicKey(mintStr);
+    const [ata] = PublicKey.findProgramAddressSync(
+      [owner.toBuffer(), tokenProgram.toBuffer(), mint.toBuffer()],
+      ATOKEN_PROGRAM,
+    );
+    return ata.toBase58();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Derive Raydium AMM v4 swap direction by matching the user's source-token ATA
+ * against derived ATAs for the pool's base/quote mints. Pure-math (no RPC).
+ *
+ * Returns `'XtoY'` if user is paying base (X) → receiving quote (Y),
+ *         `'YtoX'` if paying quote → receiving base, or `'unknown'` if no match.
+ */
+function deriveAmmV4Direction(accountIdxs, resolvedKeys, isV2, poolDecoded) {
+  if (!accountIdxs || !poolDecoded) return 'unknown';
+  const userSrcIdx = isV2 ? RAYDIUM_AMM_V4_USER_SOURCE_IDX_V2 : RAYDIUM_AMM_V4_USER_SOURCE_IDX_V1;
+  const userWalletIdx = isV2 ? RAYDIUM_AMM_V4_USER_WALLET_IDX_V2 : RAYDIUM_AMM_V4_USER_WALLET_IDX_V1;
+  if (accountIdxs.length <= userWalletIdx) return 'unknown';
+  const userSrcAta = resolvedKeys[accountIdxs[userSrcIdx]];
+  const owner = resolvedKeys[accountIdxs[userWalletIdx]];
+  if (!userSrcAta || !owner) return 'unknown';
+
+  // Pool decoder exposes base/quote mints under both raw fields and X/Y aliases.
+  const baseMint = poolDecoded.base_mint?.toBase58?.()
+    ?? poolDecoded.token_x_mint?.toBase58?.();
+  const quoteMint = poolDecoded.quote_mint?.toBase58?.()
+    ?? poolDecoded.token_y_mint?.toBase58?.();
+  if (!baseMint || !quoteMint) return 'unknown';
+
+  // Try both token program flavors — Raydium v4 only uses legacy SPL but be defensive.
+  for (const tokenProgram of [SPL_TOKEN, SPL_TOKEN_2022]) {
+    const baseAta = deriveAtaBase58(owner, tokenProgram, baseMint);
+    if (baseAta === userSrcAta) return 'XtoY'; // user pays base = X → receives Y
+    const quoteAta = deriveAtaBase58(owner, tokenProgram, quoteMint);
+    if (quoteAta === userSrcAta) return 'YtoX'; // user pays quote = Y → receives X
+  }
   return 'unknown';
 }
 
@@ -192,15 +265,20 @@ export function parseSwapInstruction(ix, resolvedKeys, trackedPools, poolLookup 
 
     const amount = data.readBigUInt64LE(1);
 
-    // Direction extraction from outer accounts is non-trivial here because the
-    // user's source-token-account ATA is at acc[5] (V2) / acc[15] (V1) but the
-    // pool's coin/pc vaults at acc[3]/acc[4] (V2) / acc[5]/acc[6] (V1). For
-    // simplicity we leave direction as 'unknown' until the consumer derives it
-    // post-hoc (e.g. by observing which vault grows after the tx settles).
+    // Direction: trivially derived from the discriminator's `isBaseIn` flag.
+    // `swap_base_in`  → user pays base (coin) → receives pc/quote → 'XtoY'
+    // `swap_base_out` → user pays pc/quote → receives base/coin → 'YtoX'
+    // Our pool decoder maps: token_x_mint = base_mint, token_y_mint = quote_mint,
+    // reserve_x = coin_vault, reserve_y = pc_vault. So XtoY = coin→pc = base_in.
+    //
+    // Note: `swap_base_out` actually means "specify exact OUTPUT amount (base)",
+    // so the input is quote (Y). Hence isBaseIn=false ⇒ YtoX.
+    const direction = isBaseIn ? 'XtoY' : 'YtoX';
+
     return {
       poolAddr,
       inputAmount: amount,
-      direction: 'unknown',
+      direction,
       dex: 'raydium-amm-v4',
       via: 'direct',
       ammV4Variant: isV2 ? 'v2' : 'v1',
