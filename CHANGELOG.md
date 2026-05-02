@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] — 2026-05-02
+
+### Added
+
+- Pump AMM pool decoder now exposes `protocol_fee_recipient` (offset 243-275)
+  for pools created post-cashback upgrade. Older 243-byte pools fall back
+  to `null` so callers can use a known-recipient list. Required by swap
+  instruction builders that must populate the per-pool fee recipient
+  account in the Pump AMM `buy` / `sell` ix.
+
 ## [0.1.0] — Unreleased
 
 Initial release.
