@@ -176,7 +176,7 @@ function decodeWhirlpoolAccount(buf, disc) {
 
 // ─── Pump AMM (graduated pool) ──────────────────────────────────────────────
 //
-// Layout (243 data bytes, allocated 300):
+// Layout (allocated 301 bytes; 275 used + 26 reserved):
 //   [0..8]    discriminator        f19a6d0411b16dbc
 //   [8]       pool_bump            u8
 //   [9..11]   index                u16 LE
@@ -188,6 +188,7 @@ function decodeWhirlpoolAccount(buf, disc) {
 //   [171..203] pool_quote_token_account  pubkey  (quote vault, Y)
 //   [203..211] lp_supply           u64 LE
 //   [211..243] coin_creator        pubkey
+//   [243..275] fee_recipient       pubkey  (pool's protocol fee recipient — varies per pool!)
 function decodePumpAmmAccount(buf, disc) {
   if (disc !== DISC_PUMP_POOL) {
     return { type: 'unknown', dex: 'pump-amm', size: buf.length };
@@ -211,6 +212,12 @@ function decodePumpAmmAccount(buf, disc) {
       pool_quote_token_account: new PublicKey(buf.slice(171, 203)),
       lp_supply:        buf.readBigUInt64LE(203),
       coin_creator:     new PublicKey(buf.slice(211, 243)),
+      // protocol_fee_recipient: pool field at off 243+ when allocated >= 275.
+      // Only present for pools created post-cashback upgrade. Older 243-byte
+      // pools fall back to null (caller should use a known recipient list).
+      protocol_fee_recipient: buf.length >= 275
+        ? new PublicKey(buf.slice(243, 275))
+        : null,
     };
     return { type: 'pool', dex: 'pump-amm', decoded };
   } catch (e) {
