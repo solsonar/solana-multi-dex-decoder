@@ -215,9 +215,17 @@ function decodePumpAmmAccount(buf, disc) {
       // protocol_fee_recipient: pool field at off 243+ when allocated >= 275.
       // Only present for pools created post-cashback upgrade. Older 243-byte
       // pools fall back to null (caller should use a known recipient list).
-      protocol_fee_recipient: buf.length >= 275
-        ? new PublicKey(buf.slice(243, 275))
-        : null,
+      // Some post-275 pools also store all-zeros (= SystemProgram) here; those
+      // pools effectively have no override — treat as null so caller falls
+      // back to the global recipient list. Sending a tx with `1111...` as the
+      // recipient deterministically fails Pump constraint check (Anchor 6013).
+      protocol_fee_recipient: (() => {
+        if (buf.length < 275) return null;
+        const slice = buf.slice(243, 275);
+        let allZero = true;
+        for (let i = 0; i < 32; i++) { if (slice[i] !== 0) { allZero = false; break; } }
+        return allZero ? null : new PublicKey(slice);
+      })(),
     };
     return { type: 'pool', dex: 'pump-amm', decoded };
   } catch (e) {

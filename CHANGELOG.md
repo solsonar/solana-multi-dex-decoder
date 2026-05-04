@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] — 2026-05-04
+
+### Fixed
+
+- Pump AMM pool decoder now treats an all-zeros `protocol_fee_recipient`
+  field (offset 243-275 on post-cashback pools) as `null` rather than
+  returning a `PublicKey` containing 32 zero bytes (which equals
+  `SystemProgram::id()`). Pump's swap instruction validates the recipient
+  via set-membership against `PUMP_AMM_GLOBAL_CONFIG.protocol_fee_recipients`,
+  and `11111111…` is never in that list, so sending it deterministically
+  fails with Anchor 6013 `InvalidProtocolFeeRecipient`. Returning `null`
+  lets callers fall back to a known-recipient list. Observed on TROLL/SOL
+  Pump pool `4w2cysotX6czaUGmmWg13hDpY4QEMG2CzeKYEQyK9Ama` (data length 301,
+  field at 243-275 was all zeros).
+
+## [0.2.2] — 2026-05-03
+
+### Added
+
+- `SwapParser` exposes `victimFeeRecipient` on parsed Pump AMM swap
+  instructions (account index 9). Pump rotates fee recipients per slot;
+  using the value from the victim's own ix guarantees validity at the
+  current slot. Consumers (e.g. backrun arb executors) override the
+  pool-data default with this value when present.
+
 ## [0.2.1] — 2026-05-02
 
 ### Added
