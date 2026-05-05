@@ -1,6 +1,6 @@
 {
   "name": "@solsonar/solana-multi-dex-decoder",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Synchronous, zero-RPC decoder for Solana DEX pool accounts and swap instructions across six major DEXes: Meteora DLMM, Orca Whirlpool, Pump AMM, Raydium AMM v4, Raydium CPMM, Raydium CLMM.",
   "keywords": [
     "solana",

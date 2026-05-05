@@ -234,13 +234,17 @@ export function parseSwapInstruction(ix, resolvedKeys, trackedPools, poolLookup 
     // SELL: input is `base_amount_in`
     const inputAmount = isBuy ? data.readBigUInt64LE(16) : data.readBigUInt64LE(8);
 
-    // Extract protocol_fee_recipient (acc[9]) — the Pump AMM program rotates
-    // through 8 known recipients per slot; the static one in pool data is
-    // not always valid. Using the recipient from the victim's own ix
-    // guarantees a recipient that's valid in the current slot. Required for
-    // arb sell legs that ride alongside a Pump AMM victim.
+    // Extract protocol_fee_recipient (acc[9]) — rotates per slot through 8 known recipients.
     const victimFeeRecipient = accountIdxs.length > 9
       ? resolvedKeys[accountIdxs[9]] ?? null
+      : null;
+
+    // Extract buyback_fee_recipient — also rotates per slot through 8 known recipients.
+    // BUY layout: acc[23] = buyback_fee_recipient (25 total + 1 remaining).
+    // SELL layout: acc[21] = buyback_fee_recipient (23 total + 1 remaining).
+    const buybackIdx = isBuy ? 23 : 21;
+    const victimBuybackRecipient = accountIdxs.length > buybackIdx
+      ? resolvedKeys[accountIdxs[buybackIdx]] ?? null
       : null;
 
     return {
@@ -250,6 +254,7 @@ export function parseSwapInstruction(ix, resolvedKeys, trackedPools, poolLookup 
       dex: 'pump-amm',
       via: 'direct',
       victimFeeRecipient,
+      victimBuybackRecipient,
     };
   }
 
