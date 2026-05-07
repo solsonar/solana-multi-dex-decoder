@@ -280,15 +280,21 @@ export function parseSwapInstruction(ix, resolvedKeys, trackedPools, poolLookup 
 
     const amount = data.readBigUInt64LE(1);
 
-    // Direction: trivially derived from the discriminator's `isBaseIn` flag.
-    // `swap_base_in`  → user pays base (coin) → receives pc/quote → 'XtoY'
-    // `swap_base_out` → user pays pc/quote → receives base/coin → 'YtoX'
-    // Our pool decoder maps: token_x_mint = base_mint, token_y_mint = quote_mint,
-    // reserve_x = coin_vault, reserve_y = pc_vault. So XtoY = coin→pc = base_in.
+    // Direction: derive from user's source-token ATA (matches input token to
+    // pool's base/quote mint). `isBaseIn` discriminator means "exact-input
+    // amount specified" — input token can still be EITHER base OR quote, so
+    // it's not a reliable direction signal. ATA matching is.
     //
-    // Note: `swap_base_out` actually means "specify exact OUTPUT amount (base)",
-    // so the input is quote (Y). Hence isBaseIn=false ⇒ YtoX.
-    const direction = isBaseIn ? 'XtoY' : 'YtoX';
+    // Requires `poolLookup` (caller passes PoolStateCache). Falls back to
+    // 'unknown' if pool not cached — better than wrong direction.
+    //
+    // Bug #19 fix (2026-05-07): previously used `isBaseIn ? 'XtoY' : 'YtoX'`
+    // which gave wrong direction in ~50% of v4 swaps. Verified on-chain
+    // against 2 SUSPECT cases — both flipped after this change.
+    const poolEntry = poolLookup?.get?.(poolAddr);
+    const direction = poolEntry?.decoded
+      ? deriveAmmV4Direction(accountIdxs, resolvedKeys, isV2, poolEntry.decoded)
+      : 'unknown';
 
     return {
       poolAddr,
